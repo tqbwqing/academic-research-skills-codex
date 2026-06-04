@@ -4,12 +4,28 @@ All notable changes to the Codex package are documented here.
 
 ## Unreleased
 
+## [0.1.10] - 2026-06-04
+
 ### Added
 - Added an optional Codex full-runtime adapter profile under
   `skills/academic-research-suite/codex/`, including deterministic route
   planning, Codex agent-team templates, a disabled-by-default hook pack, and
   adapter quality gates. Default ARS Codex behavior remains inline role-prompt
   execution.
+
+### Changed
+- Vendored upstream ARS from `4c38571798da4b1ed604ec2c1e01a6f66a7de5a7`
+  (`v3.10.0` plus release-manifest alignment) to
+  `ca5b713d9d802af85d4c74552604b062a618b1c1` (`v3.11.0` plus post-tag #310
+  follow-up fixes).
+- Added ARS v3.11 runtime content, including the deterministic citation
+  verification gate, arXiv resolver, persistent verification cache, citation
+  verification summary contract, standalone verification gate API, and
+  `ars-cache-invalidate` command recipe.
+- Kept Codex-specific overlays: single root router skill, `WORKFLOW.md`
+  vendored workflow entry files, Codex setup/architecture docs, nested-path lint
+  patches, excluded showcase PDFs, macOS Bash 3.2 audit wrapper compatibility,
+  and explicit cross-model consent boundaries.
 
 ### Security
 - Added Codex security boundaries for untrusted research inputs, cross-model

@@ -10,24 +10,16 @@ absolute threshold + ack contract (its name must not over-promise).
 from __future__ import annotations
 
 from pathlib import Path
-import json
 
 import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "eval-harness.yml"
-CODEX_PACKAGE_MANIFEST_PATH = REPO_ROOT.parent / "manifest.json"
-
-
-def _is_codex_distribution() -> bool:
-    if not CODEX_PACKAGE_MANIFEST_PATH.is_file():
-        return False
-    try:
-        manifest = json.loads(CODEX_PACKAGE_MANIFEST_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return False
-    return manifest.get("generated_for") == "codex"
+pytestmark = pytest.mark.skipif(
+    not WORKFLOW_PATH.exists(),
+    reason="eval-harness GitHub workflow is not included in the ars-codex package",
+)
 
 
 class _NoDuplicateKeyLoader(yaml.SafeLoader):
@@ -53,8 +45,6 @@ _NoDuplicateKeyLoader.add_constructor(
 
 @pytest.fixture(scope="module")
 def raw() -> str:
-    if not WORKFLOW_PATH.is_file() and _is_codex_distribution():
-        pytest.skip(".github workflows are intentionally excluded from the Codex package")
     return WORKFLOW_PATH.read_text(encoding="utf-8")
 
 

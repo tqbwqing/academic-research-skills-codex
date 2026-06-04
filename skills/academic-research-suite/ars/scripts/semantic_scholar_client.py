@@ -30,7 +30,7 @@ try:
         _BACKOFF_SECONDS,
         _MAX_RETRIES,
         _TITLE_SIMILARITY_THRESHOLD,
-        _normalize_title as _normalize_title,
+        _normalize_title,
         _similarity,
     )
     from contamination_signals import SemanticScholarUnavailable
@@ -39,7 +39,7 @@ except ImportError:
         _BACKOFF_SECONDS,
         _MAX_RETRIES,
         _TITLE_SIMILARITY_THRESHOLD,
-        _normalize_title as _normalize_title,
+        _normalize_title,
         _similarity,
     )
     from scripts.contamination_signals import SemanticScholarUnavailable
@@ -238,7 +238,9 @@ class SemanticScholarClient:
         raise SemanticScholarUnavailable(f"S2 API exhausted {_MAX_RETRIES} retries")
 
     def _lookup_by_doi(self, doi: str, expected_title: str) -> dict[str, Any]:
-        data = self._request(f"/paper/DOI:{urllib.parse.quote(doi)}?fields={_FIELDS}")
+        data = self._request(
+            f"/paper/DOI:{urllib.parse.quote(doi, safe='')}?fields={_FIELDS}"
+        )
         if not data or not data.get("paperId"):
             return {"matched": False, "paperId": None}
         # Per protocol: cross-check title; DOI_MISMATCH counts as no-match

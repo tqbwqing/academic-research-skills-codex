@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from scripts._test_helpers import run_script
+from tests.test_helpers import run_script
 
 SCRIPT = Path(__file__).resolve().parent / "check_collaboration_depth_rubric.py"
 
@@ -224,7 +224,7 @@ class TestCollaborationDepthRubric(unittest.TestCase):
             self.assertEqual(r.returncode, 1)
             self.assertIn("dispatch anchor", r.stdout.lower())
 
-    def test_workflow_md_without_nonblocking_phrase_fails(self) -> None:
+    def test_skill_md_without_nonblocking_phrase_fails(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             _make_repo(root)

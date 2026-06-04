@@ -83,26 +83,6 @@ def _run_git(args: list[str], cwd: Path = REPO_ROOT) -> tuple[int, str, str]:
     return result.returncode, result.stdout.strip(), result.stderr.strip()
 
 
-_GIT_PREFIX: str | None = None
-
-
-def _git_repo_path(repo_root_relpath: str) -> str:
-    """Return a git-object path for a path relative to the ARS root.
-
-    Upstream ARS is normally checked out at the git repository root, where
-    `scripts/foo.py` is both an ARS-root path and a git-object path. The Codex
-    package vendors ARS under `skills/academic-research-suite/ars/`, so git
-    object lookups such as `git show <commit>:scripts/foo.py` need the current
-    `git rev-parse --show-prefix` prepended. Pathspecs passed to `git log` are
-    also kept explicit for the same nested checkout case.
-    """
-    global _GIT_PREFIX
-    if _GIT_PREFIX is None:
-        rc, out, _ = _run_git(["rev-parse", "--show-prefix"])
-        _GIT_PREFIX = out if rc == 0 else ""
-    return f"{_GIT_PREFIX}{repo_root_relpath}"
-
-
 def _resolve_default_branch() -> tuple[str | None, str | None]:
     """Resolve the repo's default branch via the spec's three-step ladder.
 
@@ -153,9 +133,9 @@ def _v3_6_7_base_commit() -> tuple[str | None, str | None]:
     (round-4 R4-002 + round-5 R5-001 + round-6 R6-002 amend; no stored
     base_commit field, no dual truth).
     """
-    manifest_path = _git_repo_path("scripts/v3_6_7_inversion_manifest.json")
     rc, out, stderr = _run_git([
-        "log", "-1", "--format=%H", "--", manifest_path,
+        "log", "-1", "--format=%H", "--",
+        "scripts/v3_6_7_inversion_manifest.json",
     ])
     if rc != 0 or not out:
         return None, (
@@ -220,7 +200,6 @@ def _v3_6_7_manifest_unchanged_in_pr() -> tuple[bool, str | None]:
         return True, None
     mb = mb.strip()
     rel = "scripts/v3_6_7_inversion_manifest.json"
-    git_rel = _git_repo_path(rel)
 
     # Round-4 closure: scan merge-base..HEAD for ANY commit that touches the
     # manifest, regardless of whether the final HEAD bytes equal the base
@@ -228,7 +207,7 @@ def _v3_6_7_manifest_unchanged_in_pr() -> tuple[bool, str | None]:
     # modifies the manifest + a protected block, then a later PR commit
     # reverts only the manifest.
     rc_log, log_out, log_err = _run_git([
-        "log", "--format=%H", f"{mb}..HEAD", "--", git_rel,
+        "log", "--format=%H", f"{mb}..HEAD", "--", rel,
     ])
     if rc_log != 0:
         # Couldn't list touching commits — be loud, don't pass silently.
@@ -262,19 +241,11 @@ def _v3_6_7_manifest_unchanged_in_pr() -> tuple[bool, str | None]:
     head_bytes = head_path.read_bytes() if head_path.exists() else None
     base_bytes, err = _read_blob_at_commit(mb, rel)
     if err is not None:
-        codex_baseline, codex_err = _load_codex_v3_6_7_baseline()
-        if codex_baseline is not None:
-            # First-import Codex state: the vendored ARS files exist in the
-            # working tree before this repository has Git history for the
-            # upstream v3.6.7 manifest. The explicit Codex baseline below
-            # preserves the anti-self-baseline property for this state.
-            return True, None
         return False, (
             "[ARS-V3.7.1 LINT ERROR: anti-self-baseline guard tripped: "
             "v3.6.7 manifest does not exist at PR base commit "
             f"{mb[:12]}. Manifest creation / re-creation is not a "
-            "v3.7.1-work-PR action, and Codex vendored baseline validation "
-            f"failed ({codex_err}). Land manifest changes in a separate "
+            "v3.7.1-work-PR action. Land manifest changes in a separate "
             "amendment PR (round-2 codex P2 closure)]"
         )
     if head_bytes is None:
@@ -393,9 +364,8 @@ def _extract_block_bytes(file_bytes: bytes) -> bytes | None:
 
 def _read_blob_at_commit(commit: str, repo_relpath: str) -> tuple[bytes | None, str | None]:
     """Return (raw bytes, error). Uses `git show <commit>:<path>`."""
-    git_relpath = _git_repo_path(repo_relpath)
     result = subprocess.run(
-        ["git", "show", f"{commit}:{git_relpath}"],
+        ["git", "show", f"{commit}:{repo_relpath}"],
         cwd=REPO_ROOT,
         capture_output=True,
         check=False,
@@ -403,7 +373,7 @@ def _read_blob_at_commit(commit: str, repo_relpath: str) -> tuple[bytes | None, 
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace").strip()
         return None, (
-            f"[ARS-V3.7.1 LINT ERROR: `git show {commit}:{git_relpath}` "
+            f"[ARS-V3.7.1 LINT ERROR: `git show {commit}:{repo_relpath}` "
             f"failed: {stderr!r}]"
         )
     return result.stdout, None
@@ -411,43 +381,6 @@ def _read_blob_at_commit(commit: str, repo_relpath: str) -> tuple[bytes | None, 
 
 def _sha256(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
-
-
-def _load_codex_v3_6_7_baseline() -> tuple[dict[str, dict] | None, str | None]:
-    """Load the Codex first-vendor v3.6.7 block baseline.
-
-    Upstream ARS normally derives the baseline from Git history. The Codex
-    package can be tested before the initial vendor commit exists, so Git
-    history has no v3.6.7 manifest yet. This file pins the imported upstream
-    block SHAs and validates the current manifest bytes before it is trusted.
-    """
-    if not CODEX_V3_6_7_BASELINE.exists():
-        return None, f"Codex baseline missing at {CODEX_V3_6_7_BASELINE.relative_to(REPO_ROOT)}"
-    try:
-        data = json.loads(CODEX_V3_6_7_BASELINE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        return None, f"Codex baseline unreadable: {exc}"
-    if data.get("scope") != "codex-vendored-v3.6.7-block-baseline":
-        return None, f"Codex baseline has invalid scope {data.get('scope')!r}"
-    if not V3_6_7_MANIFEST.exists():
-        return None, "v3.6.7 manifest missing at PR HEAD"
-    manifest_sha = _sha256(V3_6_7_MANIFEST.read_bytes())
-    expected_manifest_sha = data.get("manifest_sha256")
-    if manifest_sha != expected_manifest_sha:
-        return None, (
-            "manifest bytes differ from Codex vendored baseline "
-            f"(HEAD={manifest_sha}, baseline={expected_manifest_sha})"
-        )
-    files = data.get("files")
-    if not isinstance(files, dict):
-        return None, "Codex baseline 'files' must be an object"
-    for rel, entry in files.items():
-        if not isinstance(rel, str) or not isinstance(entry, dict):
-            return None, "Codex baseline entries must map string paths to objects"
-        sha = entry.get("block_sha256")
-        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha):
-            return None, f"Codex baseline has invalid block_sha256 for {rel!r}"
-    return files, None
 
 
 def _load_v3_6_7_manifest() -> tuple[list[str] | None, str | None]:
@@ -468,6 +401,50 @@ def _load_v3_6_7_manifest() -> tuple[list[str] | None, str | None]:
             "of strings]"
         )
     return files, None
+
+
+def _load_codex_v3_6_7_baseline() -> tuple[dict | None, str | None]:
+    """Load the ars-codex vendored v3.6.7 block baseline, when present."""
+    if not CODEX_V3_6_7_BASELINE.exists():
+        return None, None
+    try:
+        data = json.loads(CODEX_V3_6_7_BASELINE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return None, (
+            "[ARS-V3.7.1 LINT ERROR: codex v3.6.7 baseline unreadable: "
+            f"{exc}]"
+        )
+    files = data.get("files")
+    if not isinstance(files, dict):
+        return None, (
+            "[ARS-V3.7.1 LINT ERROR: codex v3.6.7 baseline 'files' must "
+            "be an object keyed by repo-relative path]"
+        )
+    return data, None
+
+
+def _codex_v3_6_7_manifest_matches_baseline(baseline: dict) -> tuple[bool, str | None]:
+    """Guard the vendored manifest against self-baseline drift."""
+    expected = baseline.get("manifest_sha256")
+    if not isinstance(expected, str):
+        return False, (
+            "[ARS-V3.7.1 LINT ERROR: codex v3.6.7 baseline missing "
+            "'manifest_sha256']"
+        )
+    if not V3_6_7_MANIFEST.exists():
+        return False, (
+            "[ARS-V3.7.1 LINT ERROR: anti-self-baseline guard tripped: "
+            "v3.6.7 manifest missing at PR HEAD but present in ars-codex "
+            "baseline]"
+        )
+    actual = _sha256(V3_6_7_MANIFEST.read_bytes())
+    if actual != expected:
+        return False, (
+            "[ARS-V3.7.1 LINT ERROR: anti-self-baseline guard tripped: "
+            "v3.6.7 manifest bytes differ from ars-codex baseline "
+            f"(HEAD={actual}, baseline={expected})]"
+        )
+    return True, None
 
 
 def _load_v3_6_8_manifest() -> tuple[dict | None, str | None]:
@@ -905,33 +882,40 @@ def check_byte_equivalence(verbose: bool = True) -> int:
         print(err)
         return 1
 
-    # 2. Anti-self-baseline guard (round-2 codex P2 closure):
-    #    Refuse to run on PRs that mutate the v3.6.7 manifest. Without this,
-    #    `git log -1 -- v3_6_7_inversion_manifest.json` would resolve to the
-    #    PR's own commit and the SHA comparison would hash modified content
-    #    against itself.
-    ok, err = _v3_6_7_manifest_unchanged_in_pr()
-    if not ok:
+    codex_baseline, err = _load_codex_v3_6_7_baseline()
+    if err is not None:
         print(err)
         return 1
-
-    # 3. v3.6.7 base derivation (single source of truth in upstream history,
-    #    Codex vendored baseline in first-import working trees).
-    base_commit, err = _v3_6_7_base_commit()
-    codex_baseline: dict[str, dict] | None = None
-    if err is not None:
-        codex_baseline, codex_err = _load_codex_v3_6_7_baseline()
-        if codex_baseline is None:
+    base_commit: str | None = None
+    if codex_baseline is not None:
+        ok, err = _codex_v3_6_7_manifest_matches_baseline(codex_baseline)
+        if not ok:
             print(err)
-            print(f"[ARS-V3.7.1 LINT ERROR: Codex vendored baseline unavailable: {codex_err}]")
             return 1
         if verbose:
+            source_commit = str(codex_baseline.get("source_commit", ""))[:12]
             print(
-                "[v3.7.1 SHA gate] using Codex vendored v3.6.7 baseline: "
-                f"{CODEX_V3_6_7_BASELINE.relative_to(REPO_ROOT)}"
+                "[v3.7.1 SHA gate] ars-codex v3.6.7 baseline: "
+                f"{source_commit or 'recorded'}"
             )
-    elif verbose:
-        print(f"[v3.7.1 SHA gate] v3.6.7 base commit: {base_commit[:12]}")
+    else:
+        # 2. Anti-self-baseline guard (round-2 codex P2 closure):
+        #    Refuse to run on PRs that mutate the v3.6.7 manifest. Without this,
+        #    `git log -1 -- v3_6_7_inversion_manifest.json` would resolve to the
+        #    PR's own commit and the SHA comparison would hash modified content
+        #    against itself.
+        ok, err = _v3_6_7_manifest_unchanged_in_pr()
+        if not ok:
+            print(err)
+            return 1
+
+        # 3. v3.6.7 base commit derivation (single source of truth)
+        base_commit, err = _v3_6_7_base_commit()
+        if err is not None:
+            print(err)
+            return 1
+        if verbose:
+            print(f"[v3.7.1 SHA gate] v3.6.7 base commit: {base_commit[:12]}")
 
     # 3. Load v3.6.7 manifest (file list = single source of truth)
     files_v367, err = _load_v3_6_7_manifest()
@@ -972,16 +956,22 @@ def check_byte_equivalence(verbose: bool = True) -> int:
                 "boundary rule violated — v3.7.1 must NOT mutate v3.6.7 blocks)"
             )
             continue
+        head_sha = _sha256(head_block)
         if codex_baseline is not None:
-            baseline_entry = codex_baseline.get(rel)
-            if baseline_entry is None:
+            baseline_entry = codex_baseline["files"].get(rel)
+            if not isinstance(baseline_entry, dict):
                 failures.append(
-                    f"  [{rel}] missing from Codex vendored baseline "
-                    f"{CODEX_V3_6_7_BASELINE.relative_to(REPO_ROOT)}"
+                    f"  [{rel}] missing from ars-codex v3.6.7 baseline file"
                 )
                 continue
-            base_sha = baseline_entry["block_sha256"]
+            base_sha = baseline_entry.get("block_sha256")
+            if not isinstance(base_sha, str):
+                failures.append(
+                    f"  [{rel}] ars-codex v3.6.7 baseline missing block_sha256"
+                )
+                continue
         else:
+            assert base_commit is not None
             base_bytes_full, err = _read_blob_at_commit(base_commit, rel)
             if err is not None:
                 failures.append(f"  [{rel}] {err}")
@@ -995,7 +985,6 @@ def check_byte_equivalence(verbose: bool = True) -> int:
                 )
                 continue
             base_sha = _sha256(base_block)
-        head_sha = _sha256(head_block)
         if head_sha != base_sha:
             failures.append(
                 f"  [{rel}] BYTE-EQUIVALENCE FAIL\n"

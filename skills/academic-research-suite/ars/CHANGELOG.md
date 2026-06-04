@@ -4,6 +4,76 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.11.0] - 2026-06-04 — Deterministic citation verification gate (#182)
+
+The v3.11.0 minor release ships **#182 — a deterministic citation-existence verification gate**
+that runs independently of LLM peer review. It cross-checks every cited reference against up to
+four bibliographic indexes (Semantic Scholar + OpenAlex + Crossref + the new arXiv resolver) and
+surfaces a per-citation `lookup_verified` status, so a fabricated citation with a provably-bogus
+DOI/arXiv ID is caught by deterministic lookup rather than by hoping a reviewer agent notices.
+The gate **inherits the v3.10 `terminal_policies` opt-in model** — default advisory, opt-in
+`strict` — rather than introducing a second hard-block philosophy: detection always runs and
+populates the summary, but a `lookup_verified == false` row is terminal only under
+`terminal_policies.citation_existence == strict`. **Default behavior is non-blocking** (advisory,
+`/ars-mark-read`-acknowledgeable); a user must opt into `strict` to make existence-failure
+terminal. The `false` definition is deliberately **narrowed to ID-keyed unmatched** (an exact
+DOI/arXiv lookup that provably fails), so a legitimately-unindexed humanities / non-English /
+regional citation with only a title-unmatched stays `unresolvable` and never blocks (C-V6(a); an
+acknowledged precision-over-recall tradeoff documented in the spec, mirroring `strict_articles_only`).
+
+**Five delta items (#182):**
+
+- **Delta 1 — arXiv API resolver + four-index contamination rendering.** New `scripts/arxiv_client.py`
+  verifies citation existence against `export.arxiv.org` (metadata + existence; no API key, no
+  polite-pool email — built-in rate-limit pacing per arXiv ToU; accepts both old-style
+  `hep-th/9711200` and new-style `2605.07723` IDs). `scripts/contamination_signals.py` extends the
+  v3.9.0 cross-index triangulation advisory matrix from three indexes (k=0..3) to four (k=0..4) with
+  an `arxiv_unmatched` signal, and the orchestrator finalizer + formatter render the four new
+  advisory suffixes (`CONTAMINATED-ARXIV-UNMATCHED` at the k=1/k_max=1 arxiv-only carve-out;
+  `CONTAMINATED-QUADRANGULATION-UNMATCHED` at k=4/k_max=4; plus their two `PREPRINT` compositions).
+  All advisory — the terminal gate / refusal list is unchanged (R-L3-2-E). `arxiv_unmatched` field
+  added to `literature_corpus_entry.schema.json`.
+- **Delta 2 — persistent verification cache.** New `scripts/verification_cache.py` — a local SQLite
+  store (`~/.cache/ars/verification.db`, override via `ARS_VERIFICATION_CACHE_PATH`; WAL mode;
+  90-day TTL) keyed by `(citation_key, resolver_name, query_form)`, so the same paper cited across
+  drafts is verified once. Each resolver entry point (crossref / openalex / S2 / arxiv) gains an
+  optional `cache` parameter. New `/ars-cache-invalidate <citation_key>` command removes every
+  cached row for a key (idempotent no-op when absent).
+- **Delta 3 / C-V6 — citation-existence terminal policy.** New `terminal_policies` key
+  `citation_existence` (closed enum `{advisory, strict}`, per-key absence = advisory) in
+  `terminal_policies.schema.json`, alongside `contamination_triangulation`. This replaces the
+  original Delta-3 `ARS_CLAIM_AUDIT` default-flip as the gate's on/off control. The finalizer is the
+  sole policy evaluator; `formatter_agent.md` rule 12 refuses on a `lookup_verified == false` row
+  **only under `strict`**, co-emitting `[UNVERIFIED CITATION — lookup_verified=false: ...]` alongside
+  the advisory annotation. `HIGH-BLOCK` is terminal — not `/ars-mark-read`-clearable. Manual entries
+  structurally exempt.
+- **Delta 4 — unified per-citation status surface.** New
+  `shared/contracts/passport/citation_verification_summary.schema.json` +
+  `scripts/citation_verification_summary.py` write a `lookup_verified` (enum `{true, false,
+  unresolvable}`) + `anchor_present` + `resolver_outcomes` (per-resolver `{matched, unmatched,
+  unreachable, skipped}`) row per citation. The classification is anti-fabrication-biased (one
+  ID-keyed `unmatched` is positive evidence of non-existence; a single transient outage does not
+  cancel it) and the `false` form is narrowed to ID-keyed unmatched per C-V6(a).
+- **Delta 5 — standalone `verification_gate` API.** New `scripts/verification_gate/__init__.py`
+  extracts the gate logic into a callable API composing the four resolvers + the unified summary
+  writer (a second caller of the same lower-layer infrastructure as the v3.8 audit, not a
+  duplicate). New `scripts/verify_passport.py` CLI runs the gate over a Material Passport
+  standalone.
+
+**Lint + CI:**
+
+- `scripts/check_v3_9_0_triangulation.py` (the canonical cross-version contamination-suffix oracle)
+  rule 1 upgraded from subsection token-presence to a **matrix-row oracle**: each Delta-1 token must
+  sit on the finalizer suffix-table row carrying its exact `(k, k_max)` cell, so deleting or
+  mistokening an operational row fails even when the same token survives in surrounding prose. The
+  formatter pass-through allowlist set-equality oracle extends 9 → 13 tokens.
+- `scripts/_ci_pytest_manifest.toml` backfills 5 data-layer test entries (citation-verification-summary
+  / verification-gate / arxiv-client / verification-cache / verify-passport-cli) that shipped with
+  the data layer but were not wired into the manifest runner at the time.
+
+Spec: `docs/design/2026-05-21-v3.10-182-promote-citation-gate-spec.md` (§0 v3.11 amendment +
+INVARIANT C-V6).
+
 ## [3.10.0] - 2026-06-01 — Triangulation policy layer, Kong et al. survey adoptions, eval harness, scoped-write guard
 
 The v3.10.0 minor release bundles the opt-in contamination-triangulation **terminal policy
@@ -91,7 +161,7 @@ this constrains those subagents, not the user-facing skill outputs.
 
 **Documentation:**
 - `docs/ARCHITECTURE.md` updated from stale v3.8.0 baseline to v3.9.4.1; Section 8 Evolution Timeline filled in v3.8.1 / v3.8.2 / v3.9.0 / v3.9.1 / v3.9.2 / v3.9.3 / v3.9.4 / v3.9.4.1 entries; Section 9 Skill Modes table aligned to current versions.
-- Suite-version needles aligned across MODE_REGISTRY.md, README.md badge + tag URL + section heading, README.zh-TW.md badge + tag URL + section heading, academic-pipeline/SKILL.md frontmatter, `.claude-plugin/plugin.json`, `scripts/check_spec_consistency.py` expected-text constants, `.claude/CLAUDE.md` skill suite table.
+- Suite-version needles aligned across MODE_REGISTRY.md, README.md badge + tag URL + section heading, README.zh-TW.md badge + tag URL + section heading, academic-pipeline/WORKFLOW.md frontmatter, `.claude-plugin/plugin.json`, `scripts/check_spec_consistency.py` expected-text constants, `.claude/CLAUDE.md` skill suite table.
 
 **Test count:** 1549 → **1561** (+12 net new tests covering all 4 fixes, 0 regression).
 
@@ -720,7 +790,7 @@ Meta-lesson from this analysis: "we already do something adjacent" is weaker tha
 
 ### Changed
 
-- `academic-pipeline/SKILL.md` frontmatter `version: "3.7.0"` + H1 +
+- `academic-pipeline/WORKFLOW.md` frontmatter `version: "3.7.0"` + H1 +
   Version Info table.
 - `MODE_REGISTRY.md` Last updated bumped to `v3.7.0 (2026-05-05)`.
 - `.claude/CLAUDE.md` Skills Overview row + Suite version footer bumped
@@ -788,7 +858,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
   evaluator 5+5 / reviewer 5+6 (reviewer surfaces remain zero-touch per §3.6).
   `[GENERATOR-PHASE-ABORTED]` abort tag with 5% / three-month operational
   monitor.
-- **`academic-paper/SKILL.md` `## v3.6.6 Generator-Evaluator Contract Protocol`
+- **`academic-paper/WORKFLOW.md` `## v3.6.6 Generator-Evaluator Contract Protocol`
   orchestration block** (101 lines): four-call structure with system-vs-user
   content discipline, schema-vs-runtime emission distinction, per-phase lint,
   abort handling, two valid Stage 3 entry paths (standard F0/F4 + exceptional
@@ -849,7 +919,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
   v3.6.6 implementation work fully completes.
 - **`academic-paper-reviewer/references/sprint_contract_protocol.md`
   cross-reference** noting Schema 13.1 since v3.6.6 + pointing readers at
-  `academic-paper/SKILL.md` + design doc §5 for the parallel
+  `academic-paper/WORKFLOW.md` + design doc §5 for the parallel
   generator-evaluator protocol. The reviewer protocol itself is byte-equivalent
   across v3.6.2 → v3.6.8 (zero-touch promise per §3.6).
 
@@ -1107,10 +1177,10 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
 
 - `shared/handoff_schemas.md` Schema 9 — retired the v3.6.4 "Consumer-side integration
   deferred to v3.6.5+" caveat; replaced with backpointer to the consumer protocol.
-- `deep-research/SKILL.md` 2.9.1 → 2.9.2 — bibliography_agent corpus-first flow (also
+- `deep-research/WORKFLOW.md` 2.9.1 → 2.9.2 — bibliography_agent corpus-first flow (also
   syncs Version Info footer that lagged at 2.9.0).
-- `academic-paper/SKILL.md` 3.1.0 → 3.1.1 — literature_strategist_agent corpus-first flow.
-- `academic-pipeline/SKILL.md` 3.6.4 → 3.6.5 — suite version invariant.
+- `academic-paper/WORKFLOW.md` 3.1.0 → 3.1.1 — literature_strategist_agent corpus-first flow.
+- `academic-pipeline/WORKFLOW.md` 3.6.4 → 3.6.5 — suite version invariant.
 - `.claude/CLAUDE.md`, `MODE_REGISTRY.md`, `README.md`, `README.zh-TW.md`,
   `scripts/check_spec_consistency.py` updated for the version bump (suite version,
   badge, tag, changelog heading).
@@ -1142,7 +1212,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
 
 - `academic-pipeline/references/passport_as_reset_boundary.md`: "deferred to v3.6.4, PR-B" placeholders replaced with forward references to `adapters/overview.md` and `literature_corpus_entry.schema.json`.
 - `shared/handoff_schemas.md`: Schema 9 optional fields table adds `literature_corpus`; new "Literature Corpus Input Port (v3.6.4)" subsection appended after Reset Boundary Extension.
-- `academic-pipeline/SKILL.md` bumped 3.6.3 → 3.6.4 (suite version invariant). Other skills retain independent semver.
+- `academic-pipeline/WORKFLOW.md` bumped 3.6.3 → 3.6.4 (suite version invariant). Other skills retain independent semver.
 - `.claude/CLAUDE.md`, `MODE_REGISTRY.md`, `README.md`, `README.zh-TW.md`, `scripts/check_spec_consistency.py` updated for the version bump (suite version, badge, tag, changelog heading).
 
 ### Not changed (explicit non-goals)
@@ -1163,7 +1233,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
 ### Changed
 - `academic-pipeline/agents/pipeline_orchestrator_agent.md` adds §"Passport Reset Boundary (v3.6.3+)" and §"Resume Mode: `resume_from_passport`". FULL Checkpoint Template includes conditional reset-handoff tag slot.
 - `academic-pipeline/references/pipeline_state_machine.md` documents `awaiting_resume` transitions derived from the ledger (no out-of-band state).
-- `academic-pipeline/SKILL.md` adds `resume_from_passport` to the mode table and bumps version 3.6.2 → 3.6.3.
+- `academic-pipeline/WORKFLOW.md` adds `resume_from_passport` to the mode table and bumps version 3.6.2 → 3.6.3.
 - `shared/handoff_schemas.md` Schema 9 gains `reset_boundary` row + "Reset Boundary Extension (v3.6.3)" subsection with full YAML example showing both kinds.
 
 ### Changed (post-P1 fixes)
@@ -1191,7 +1261,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
   - `academic-paper/agents/draft_writer_agent.md` — quick style check, paragraph variation, colloquialisms, transition-word usage (F-003, 4 spots)
   - `academic-pipeline/agents/pipeline_orchestrator_agent.md` — **split** "Prohibited Actions" (9 items, all negative) into "Scope (delegate, don't perform)" (items 1-6, positive delegation) + "Hard boundaries (never violate)" (items 7-9, kept negative as intentional safety directives for silent-failure modes: fabrication, skipped checkpoints, skipped integrity gates) (F-004)
   - `academic-pipeline/agents/collaboration_depth_agent.md` — Agent-specific boundaries 4 bullets (F-005)
-  - `academic-pipeline/SKILL.md` — single-line UX guidance (F-006)
+  - `academic-pipeline/WORKFLOW.md` — single-line UX guidance (F-006)
   - `academic-paper/references/academic_writing_style.md` — §4 Formality 3 items (F-007, discovered during apply)
 
 ### Notes
@@ -1209,7 +1279,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
 
 ### Changed
 
-- `deep-research/SKILL.md`, `deep-research/references/socratic_mode_protocol.md`, `academic-pipeline/references/process_summary_protocol.md` — aligned text updates for the new probe section. No behaviour change when the env var is unset.
+- `deep-research/WORKFLOW.md`, `deep-research/references/socratic_mode_protocol.md`, `academic-pipeline/references/process_summary_protocol.md` — aligned text updates for the new probe section. No behaviour change when the env var is unset.
 
 ### Version
 
@@ -1227,7 +1297,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
 - `academic-pipeline/references/reinforcement_content.md` row for FULL/SLIM checkpoint — IRON RULE: observer is advisory only, never blocks, never a leaderboard.
 
 ### Changed
-- `academic-pipeline/SKILL.md` — version bump `3.3.0 → 3.4.0`. Agent Team table grows to 4 rows. New "Collaboration Depth Observer" section with explicit non-blocking guarantees and distinction from integrity verification and Stage 6 self-reflection. Reference Files table adds rubric entry.
+- `academic-pipeline/WORKFLOW.md` — version bump `3.3.0 → 3.4.0`. Agent Team table grows to 4 rows. New "Collaboration Depth Observer" section with explicit non-blocking guarantees and distinction from integrity verification and Stage 6 self-reflection. Reference Files table adds rubric entry.
 - `academic-pipeline/agents/pipeline_orchestrator_agent.md` — checkpoint Steps flow amended: after `state_tracker` update the orchestrator invokes `collaboration_depth_agent` on the just-completed stage's dialogue range (FULL/SLIM only; MANDATORY integrity gates explicitly skip) and injects its output into checkpoint templates as a named "Collaboration Depth" section. FULL checkpoint template expanded with the observer block; SLIM template gains a one-line compact observer summary; MANDATORY template unchanged (integrity gates never dilute). New "Collaboration Depth Observer" subsection under §3 Checkpoint Management covers invocation, cross-model behaviour, short-stage guard, and non-blocking IRON RULE.
 - `academic-pipeline/agents/state_tracker_agent.md` — Write Access Control adds `collaboration_depth_agent` (append-only `collaboration_depth_history[]`). New `dialogue_log_ref` turn-range pointer per stage; new `collaboration_depth_history[]` root-level array; new `append_observer_report()` function (only function that writes the history; preconditions block any attempt to turn observer output into a blocking condition).
 - `scripts/_skill_lint.py` — new shared `split_frontmatter(text) -> (dict|None, str)` lenient helper, reused by the new lint.
@@ -1259,9 +1329,9 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
 ### Changed
 
 - `shared/handoff_schemas.md`: Schema 12 pointer + Material Passport `compliance_history[]` (append-only audit trail).
-- `academic-pipeline/SKILL.md` (v3.2.2 → v3.3.0): Stage 2.5 / 4.5 extended with compliance payload; checkpoint dashboard gains compliance row.
-- `deep-research/SKILL.md` (v2.8.1 → v2.9.0): `systematic-review` mode now triggers `compliance_agent` at both gates.
-- `academic-paper/SKILL.md` (v3.0.2 → v3.1.0): `full` mode adds pre-finalize RAISE principles-only check (warn-only). `disclosure` mode unchanged and complementary.
+- `academic-pipeline/WORKFLOW.md` (v3.2.2 → v3.3.0): Stage 2.5 / 4.5 extended with compliance payload; checkpoint dashboard gains compliance row.
+- `deep-research/WORKFLOW.md` (v2.8.1 → v2.9.0): `systematic-review` mode now triggers `compliance_agent` at both gates.
+- `academic-paper/WORKFLOW.md` (v3.0.2 → v3.1.0): `full` mode adds pre-finalize RAISE principles-only check (warn-only). `disclosure` mode unchanged and complementary.
 - `.github/workflows/spec-consistency.yml`: added compliance validator + unit test runner steps.
 - `scripts/check_spec_consistency.py`: version pins bumped.
 - `README.md`, `README.zh-TW.md`, `.claude/CLAUDE.md`, `MODE_REGISTRY.md`: suite version → 3.4.0.
@@ -1323,7 +1393,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
 - `scripts/check_spec_consistency.py` now validates README relative Markdown links so future dead links fail CI.
 
 ### Changed
-- DOCX generation contract aligned across README, `academic-paper/SKILL.md`, `academic-paper/agents/formatter_agent.md`, `academic-pipeline/SKILL.md`, and `academic-pipeline/agents/pipeline_orchestrator_agent.md`: direct `.docx` output is Pandoc-dependent, with Markdown + conversion instructions as the fallback.
+- DOCX generation contract aligned across README, `academic-paper/WORKFLOW.md`, `academic-paper/agents/formatter_agent.md`, `academic-pipeline/WORKFLOW.md`, and `academic-pipeline/agents/pipeline_orchestrator_agent.md`: direct `.docx` output is Pandoc-dependent, with Markdown + conversion instructions as the fallback.
 - Added regression tests covering missing closing fences and non-mapping YAML frontmatter in both lint test suites.
 - Suite version bumped to `3.3.3` across release-facing docs; `academic-paper` patch-bumped to `3.0.2` and `academic-pipeline` patch-bumped to `3.2.2`.
 
@@ -1353,7 +1423,7 @@ Reference: `feedback_codex_review_vs_resume_audit_scope.md`.
 - Cross-model wording now matches the implemented scope: integrity sample verification and independent DA critique are shipped; sixth-reviewer peer review remains planned
 - `academic-pipeline` checkpoint docs now state that SLIM checkpoints still wait for explicit user confirmation
 - `academic-pipeline` integrity gate docs now consistently state that Stage 2.5 and Stage 4.5 cannot be skipped
-- `academic-paper/SKILL.md` mode-count heading and `academic-paper-reviewer/SKILL.md` Version Info block
+- `academic-paper/WORKFLOW.md` mode-count heading and `academic-paper-reviewer/WORKFLOW.md` Version Info block
 
 ### Added
 - `scripts/check_spec_consistency.py` to catch mode-count, version-block, and forbidden-claim drift

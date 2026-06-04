@@ -31,7 +31,7 @@ Lifecycle ownership notes (E8/E9 — discipline rules with no lint surface):
        human terminal).
 
 Reuse:
-  - scripts/_test_helpers.load_json_schema / build_schema_validator (FORMAT_CHECKER)
+  - tests/test_helpers.load_json_schema / build_schema_validator (FORMAT_CHECKER)
   - scripts/_next_verified_at_ms.next_verified_at_ms (D3 monotonic helper)
   - audit_snapshot is the Phase 6.1 reference for argparse subcommand pattern.
 
@@ -44,12 +44,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 try:
     import yaml
@@ -215,7 +216,7 @@ def _load_yaml_or_json(path: Path) -> Any:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() == ".json":
         return json.loads(text)
-    return yaml.load(text, Loader=_StrTimestampSafeLoader)  # nosec B506
+    return yaml.load(text, Loader=_StrTimestampSafeLoader)
 
 
 class _StrTimestampSafeLoader(yaml.SafeLoader):
@@ -723,22 +724,17 @@ def check_b4(sidecar: dict[str, Any] | None, repo_root: Path,
     git_sha = _safe_get(sidecar, "runner", "git_sha")
     if not isinstance(git_sha, str):
         return []
-    # Skip live-git check when not in a real git repo (allows synthetic fixtures
-    # with valid-looking but fictitious SHAs to pass B4 without false positive).
-    # Codex vendors ARS below the repository root, so repo_root/.git may be
-    # absent even though `git -C repo_root` resolves through a parent worktree.
-    looks_like_ars_root = (
-        (repo_root / "scripts/check_audit_artifact_consistency.py").is_file()
-        and (repo_root / "shared/contracts/audit").is_dir()
-    )
-    if not (repo_root / ".git").exists() and not looks_like_ars_root:
+    # Skip live-git check when not in a real git repo. Use git's own
+    # discovery instead of requiring repo_root/.git because ars-codex vendors
+    # ARS under a subdirectory of the package repo.
+    git_dir = repo_root / ".git"
+    if not git_dir.exists() and repo_root.resolve() != REPO_ROOT.resolve():
         return []
-
     probe = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--is-inside-work-tree"],
+        ["git", "-C", str(repo_root), "rev-parse", "--show-toplevel"],
         capture_output=True, text=True, timeout=10,
     )
-    if probe.returncode != 0 or probe.stdout.strip() != "true":
+    if probe.returncode != 0:
         return []
     try:
         result = subprocess.run(
@@ -1832,7 +1828,7 @@ def _classify_and_validate_block(
                 if "..." in line:
                     # Mark as "schematic, not validated" if it contains literal '...'
                     out.append(LintError("F4",
-                        "schematic JSONL line contains '...' placeholder (skipped from validation)",
+                        f"schematic JSONL line contains '...' placeholder (skipped from validation)",
                         f"{md_path}:{ln_idx}",
                         severity="info"))
                     continue
@@ -1864,9 +1860,7 @@ def _classify_and_validate_block(
         # parse as YAML — use timestamp-as-string loader so we don't double-flag
         # `2026-04-30T15:22:04.123Z` as a YAML datetime object (schema needs str).
         try:
-            doc = yaml.load(  # nosec B506
-                stripped, Loader=_StrTimestampSafeLoader
-            )
+            doc = yaml.load(stripped, Loader=_StrTimestampSafeLoader)
         except yaml.YAMLError as e:
             out.append(LintError("F4", f"yaml parse error: {e}", location))
             return out

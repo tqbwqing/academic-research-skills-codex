@@ -1,14 +1,14 @@
 {
   "name": "academic-research-suite",
-  "adapter_version": "0.1.9",
+  "adapter_version": "0.1.10",
   "version_file": "VERSION",
   "generated_for": "codex",
-  "generated_date": "2026-06-01",
+  "generated_date": "2026-06-04",
   "source_repositories": [
     {
       "name": "academic-research-skills",
       "url": "https://github.com/Imbad0202/academic-research-skills.git",
-      "commit": "4c38571798da4b1ed604ec2c1e01a6f66a7de5a7",
+      "commit": "ca5b713d9d802af85d4c74552604b062a618b1c1",
       "included_paths": [
         "deep-research",
         "academic-paper",
@@ -25,7 +25,7 @@
         "docs/design",
         "docs/migration",
         "docs/PERFORMANCE.md",
-        "conftest.py",
+        "pyproject.toml",
         "top-level README, README.zh-TW, README.zh-CN, README.ja-JP, QUICKSTART, SECURITY, NOTICE, CONTRIBUTING, MODE_REGISTRY, POSITIONING",
         "requirements-dev.txt",
         "CHANGELOG.md",
@@ -93,7 +93,7 @@
     "The spec-consistency validator is patched for the Codex distribution: non-vendored .claude/CLAUDE.md is skipped, excluded showcase PDF links are not treated as broken, and WORKFLOW.md replaces internal SKILL.md entry files.",
     "The Codex package carries scripts/codex_v3_6_7_block_baseline.json so first-time vendored trees can enforce v3.6.7 block byte-equivalence before Git history contains the upstream manifest.",
     "The Codex audit wrapper is patched to run on macOS stock Bash 3.2+ instead of requiring Bash 4+.",
-    "ARS v3.10.0 plus the release-manifest alignment commit is the tracked upstream content; Claude/plugin loader files under .claude, .claude-plugin, and .github remain intentionally excluded.",
+    "ARS v3.11.0 plus post-tag #310 follow-up fixes is the tracked upstream content; Claude/plugin loader files under .claude, .claude-plugin, and .github remain intentionally excluded.",
     "Cross-model API behavior is disabled by default and requires explicit user request."
     ]
 }

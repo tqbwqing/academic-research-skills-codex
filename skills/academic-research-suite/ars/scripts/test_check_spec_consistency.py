@@ -43,7 +43,7 @@ JA_README_TEMPLATE = """\
 ### Deep Research（v2.9.4）
 ### Academic Paper（v3.2.0）
 ### Academic Paper Reviewer（v1.10.0）
-### Academic Pipeline（v3.10.0）
+### Academic Pipeline（v{ver}）
 
 ### サポートされる出力フォーマット
 
@@ -51,7 +51,8 @@ JA_README_TEMPLATE = """\
 
 ## Changelog
 
-### v{ver} (2026-06-01) — latest entry
+### v3.11.0 (2026-06-04) — latest entry
+### v3.10.0 (2026-06-01) — prior minor
 ### v3.9.4.2 (2026-05-19) — CI discipline hotfix
 ### v3.9.4.1 (2026-05-19) — previous hotfix
 ### v3.9.4 (2026-05-18) — temporal verification
@@ -110,7 +111,7 @@ ZH_CN_README_TEMPLATE = """\
 ### Deep Research (v2.9.4)
 ### Academic Paper (v3.2.0)
 ### Academic Paper Reviewer (v1.10.0)
-### Academic Pipeline (v3.10.0)
+### Academic Pipeline (v{ver})
 
 ### 支持的输出格式
 
@@ -118,7 +119,8 @@ ZH_CN_README_TEMPLATE = """\
 
 ## 更新纪录
 
-### v{ver}（2026-06-01）— latest entry
+### v3.11.0（2026-06-04）— latest entry
+### v3.10.0（2026-06-01）— prior minor
 ### v3.9.4.2（2026-05-19）— CI discipline hotfix
 ### v3.9.4.1（2026-05-19）— previous hotfix
 ### v3.9.4（2026-05-18）— temporal verification
@@ -174,7 +176,7 @@ ZH_TW_README_TEMPLATE = """\
 ### Deep Research (v2.9.4)
 ### Academic Paper (v3.2.0)
 ### Academic Paper Reviewer (v1.10.0)
-### Academic Pipeline (v3.10.0)
+### Academic Pipeline (v{ver})
 
 ### 支援的輸出格式
 
@@ -182,7 +184,8 @@ ZH_TW_README_TEMPLATE = """\
 
 ## 更新紀錄
 
-### v{ver}（2026-06-01）— latest entry
+### v3.11.0（2026-06-04）— latest entry
+### v3.10.0（2026-06-01）— prior minor
 ### v3.9.4.2（2026-05-19）— CI discipline hotfix
 ### v3.9.4.1（2026-05-19）— previous hotfix
 ### v3.9.4（2026-05-18）— temporal verification
@@ -228,11 +231,11 @@ class TestReadmeJaSections(unittest.TestCase):
 
     def test_aligned_ja_readme_passes(self) -> None:
         """A README.ja-JP.md whose badge / tag link / release headings all
-        agree with the suite version v3.10.0 must pass without errors."""
+        agree with the suite version v3.11.0 must pass without errors."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             csc.ROOT = root
-            _write_ja_readme(root, version="3.10.0")
+            _write_ja_readme(root, version="3.11.0")
 
             csc.check_readme_ja_sections()
 
@@ -243,26 +246,26 @@ class TestReadmeJaSections(unittest.TestCase):
 
     def test_stale_ja_badge_fails(self) -> None:
         """Regression for #170: if README.ja-JP.md keeps a stale v3.9.4.0
-        badge while CHANGELOG has moved to v3.10.0, the lint must surface
+        badge while CHANGELOG has moved to v3.11.0, the lint must surface
         the drift instead of silently passing (pre-fix behavior: this file
         was outside the lint's needle list and the drift never surfaced)."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             csc.ROOT = root
-            # Write the "current" v3.10.0 release block but downgrade only
+            # Write the "current" v3.11.0 release block but downgrade only
             # the badge and tag link to v3.9.4.0. This is the realistic shape
             # of drift when one place gets forgotten during a release.
-            stale = JA_README_TEMPLATE.format(ver="3.10.0").replace(
-                "version-v3.10.0-blue", "version-v3.9.4.0-blue"
+            stale = JA_README_TEMPLATE.format(ver="3.11.0").replace(
+                "version-v3.11.0-blue", "version-v3.9.4.0-blue"
             ).replace(
-                "releases/tag/v3.10.0", "releases/tag/v3.9.4.0"
+                "releases/tag/v3.11.0", "releases/tag/v3.9.4.0"
             )
             (root / "README.ja-JP.md").write_text(stale, encoding="utf-8")
 
             csc.check_readme_ja_sections()
 
             self.assertTrue(
-                any("README.ja-JP.md" in e and "v3.10.0" in e for e in csc.ERRORS),
+                any("README.ja-JP.md" in e and "v3.11.0" in e for e in csc.ERRORS),
                 msg=f"expected ja-JP drift error in: {csc.ERRORS!r}",
             )
 
@@ -283,13 +286,13 @@ class TestReadmeZhSections(unittest.TestCase):
         csc.ERRORS.extend(self._orig_errors)
 
     def test_aligned_zh_cn_readme_passes(self) -> None:
-        """Both zh-TW and zh-CN fixtures aligned to v3.10.0 produce no
+        """Both zh-TW and zh-CN fixtures aligned to v3.11.0 produce no
         lint errors. Locks the new ZH_README_CONFIGS[1] branch."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             csc.ROOT = root
-            _write_zh_tw_readme(root, version="3.10.0")
-            _write_zh_cn_readme(root, version="3.10.0")
+            _write_zh_tw_readme(root, version="3.11.0")
+            _write_zh_cn_readme(root, version="3.11.0")
 
             csc.check_readme_zh_sections()
 
@@ -300,23 +303,23 @@ class TestReadmeZhSections(unittest.TestCase):
 
     def test_stale_zh_cn_badge_fails(self) -> None:
         """Regression symmetric with #170 ja-JP: if README.zh-CN.md keeps
-        a stale v3.9.4.0 badge while the rest of the file moved to v3.10.0,
+        a stale v3.9.4.0 badge while the rest of the file moved to v3.11.0,
         the lint must surface the drift on the zh-CN branch specifically."""
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             csc.ROOT = root
-            _write_zh_tw_readme(root, version="3.10.0")
-            stale = ZH_CN_README_TEMPLATE.format(ver="3.10.0").replace(
-                "version-v3.10.0-blue", "version-v3.9.4.0-blue"
+            _write_zh_tw_readme(root, version="3.11.0")
+            stale = ZH_CN_README_TEMPLATE.format(ver="3.11.0").replace(
+                "version-v3.11.0-blue", "version-v3.9.4.0-blue"
             ).replace(
-                "releases/tag/v3.10.0", "releases/tag/v3.9.4.0"
+                "releases/tag/v3.11.0", "releases/tag/v3.9.4.0"
             )
             (root / "README.zh-CN.md").write_text(stale, encoding="utf-8")
 
             csc.check_readme_zh_sections()
 
             self.assertTrue(
-                any("README.zh-CN.md" in e and "v3.10.0" in e for e in csc.ERRORS),
+                any("README.zh-CN.md" in e and "v3.11.0" in e for e in csc.ERRORS),
                 msg=f"expected zh-CN drift error in: {csc.ERRORS!r}",
             )
 

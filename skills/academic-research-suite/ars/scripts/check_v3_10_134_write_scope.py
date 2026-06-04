@@ -42,7 +42,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MANIFEST_PATH = REPO_ROOT / "scripts" / "ars_phase_scope_manifest.json"
-CODEX_PACKAGE_MANIFEST_PATH = REPO_ROOT.parent / "manifest.json"
 
 # Single-sourced Bucket A roster (the classification-table Bucket A rows). IDENTICAL to
 # check_v3_9_2_phase_boundary.py's BUCKET_A_AGENTS — kept in lockstep by I1 (count) +
@@ -96,6 +95,15 @@ BUCKET_BCD_AGENT_FILES = [
     "academic-paper-reviewer/agents/field_analyst_agent.md",
 ]
 
+# ars-codex carries experiment-agent as a Codex-only auxiliary workflow outside
+# the ARS pipeline write-scope hook. It is deliberately excluded from the
+# upstream Bucket A/B/C/D roster and phase-scope manifest, but it must not make
+# the filesystem exhaustiveness guard fail open on the packaged repo.
+CODEX_AUXILIARY_AGENT_FILES = [
+    "experiment-agent/agents/code_runner_agent.md",
+    "experiment-agent/agents/study_manager_agent.md",
+]
+
 _NAME_RE = re.compile(r"^name:\s*(.+?)\s*$", re.MULTILINE)
 # Line-anchored fence so a literal `---` inside a description value can't split the
 # block early (^---$ on its own line, tolerating trailing whitespace).
@@ -135,32 +143,6 @@ def load_manifest_keys() -> set[str]:
     return set(load_manifest().get("agents", {}).keys())
 
 
-def codex_extra_agent_roots() -> tuple[str, ...]:
-    """Return non-upstream ARS agent roots vendored by the Codex adapter.
-
-    The #134 write-scope roster is defined by upstream academic-research-skills.
-    The Codex package also vendors experiment-agent from a separate repository;
-    those agents are outside the v3.10 #134 classification table and must not
-    make the upstream roster-exhaustiveness guard fail.
-    """
-    if not CODEX_PACKAGE_MANIFEST_PATH.is_file():
-        return ()
-    try:
-        manifest = json.loads(CODEX_PACKAGE_MANIFEST_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return ()
-    if manifest.get("generated_for") != "codex":
-        return ()
-    roots: list[str] = []
-    for repo in manifest.get("source_repositories", []):
-        if not isinstance(repo, dict) or repo.get("name") == "academic-research-skills":
-            continue
-        for included in repo.get("included_paths", []):
-            if isinstance(included, str):
-                roots.append(included.rstrip("/") + "/agents/")
-    return tuple(roots)
-
-
 def run_checks() -> list[str]:
     errors: list[str] = []
 
@@ -192,16 +174,21 @@ def run_checks() -> list[str]:
     #   * Comparing resolved paths also means a genuinely NEW standalone .md (not a symlink)
     #     at any depth is still flagged, because it resolves to itself and is absent from the
     #     roster. That is exactly the fail-open case we want to catch.
-    declared = set(BUCKET_A_AGENT_FILES) | set(BUCKET_BCD_AGENT_FILES)
-    ignored_agent_roots = codex_extra_agent_roots()
+    declared_auxiliary = {
+        rel for rel in CODEX_AUXILIARY_AGENT_FILES
+        if (REPO_ROOT / rel).exists()
+    }
+    declared = (
+        set(BUCKET_A_AGENT_FILES)
+        | set(BUCKET_BCD_AGENT_FILES)
+        | declared_auxiliary
+    )
     undeclared = []
     for md in REPO_ROOT.glob("**/agents/*.md"):
         if ".git" in md.parts:
             continue
         # .as_posix() so the comparison uses `/` on every OS (the rosters use `/`).
         rel = md.relative_to(REPO_ROOT).as_posix()
-        if any(rel.startswith(root) for root in ignored_agent_roots):
-            continue
         if rel in declared:
             continue  # directly rostered — skip the symlink resolve (the common case)
         # Not directly rostered: it may be a symlink to a rostered file (the plugin-root
