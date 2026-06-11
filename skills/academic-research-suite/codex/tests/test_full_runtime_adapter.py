@@ -54,6 +54,15 @@ def test_ars_lit_review_alias_routes_to_lit_review_mode() -> None:
     assert plan["mode"] == "lit-review"
 
 
+def test_ars_cache_invalidate_alias_routes_to_pipeline_cache_mode() -> None:
+    planner = _load_planner()
+    plan = planner.plan_request("ars-cache-invalidate smith2024", env={})
+    assert plan["command_alias"] == "ars-cache-invalidate"
+    assert plan["workflow"] == "academic-pipeline"
+    assert plan["mode"] == "cache-invalidate"
+    assert plan["command_recipe"] == "ars/commands/ars-cache-invalidate.md"
+
+
 def test_ars_full_starts_pipeline_and_stops_at_dashboard_checkpoint() -> None:
     planner = _load_planner()
     plan = planner.plan_request(
